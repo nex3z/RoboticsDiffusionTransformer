@@ -12,6 +12,9 @@ import torch
 from collections import deque
 from PIL import Image
 import cv2
+from pathlib import Path
+import imageio
+
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -26,6 +29,7 @@ def parse_args(args=None):
     parser.add_argument("--num-procs", type=int, default=1, help="Number of processes to use to help parallelize the trajectory replay process. This uses CPU multiprocessing and only works with the CPU simulation backend at the moment.")
     parser.add_argument("--pretrained_path", type=str, default=None, help="Path to the pretrained model")
     parser.add_argument("--random_seed", type=int, default=0, help="Random seed for the environment.")
+    parser.add_argument("--output-dir", type=str, default=None, help="Output dir.")
     return parser.parse_args()
 
 import random
@@ -67,7 +71,8 @@ env = gym.make(
 config_path = 'configs/base.yaml'
 with open(config_path, "r") as fp:
     config = yaml.safe_load(fp)
-pretrained_text_encoder_name_or_path = "google/t5-v1_1-xxl"
+# pretrained_text_encoder_name_or_path = "google/t5-v1_1-xxl"
+pretrained_text_encoder_name_or_path = None
 pretrained_vision_encoder_name_or_path = "google/siglip-so400m-patch14-384"
 pretrained_path = args.pretrained_path
 policy = create_model(
@@ -89,8 +94,9 @@ total_episodes = args.num_traj
 success_count = 0  
 
 base_seed = 20241201
+output_dir = Path(args.output_dir) if args.output_dir is not None else None
 import tqdm
-for episode in tqdm.trange(total_episodes):
+for episode_idx, episode in enumerate(tqdm.trange(total_episodes)):
     obs_window = deque(maxlen=2)
     obs, _ = env.reset(seed = episode + base_seed)
     policy.reset()
@@ -105,7 +111,6 @@ for episode in tqdm.trange(total_episodes):
 
     success_time = 0
     done = False
-
     while global_steps < MAX_EPISODE_STEPS and not done:
         image_arrs = []
         for window_img in obs_window:
@@ -133,5 +138,15 @@ for episode in tqdm.trange(total_episodes):
                     break 
     print(f"Trial {episode+1} finished, success: {info['success']}, steps: {global_steps}")
 
+    if output_dir is not None:
+        episode_file = output_dir / f"episode_{episode_idx:05d}.mp4"
+        episode_file.parent.mkdir(parents=True, exist_ok=True)
+        video_writer = imageio.get_writer(episode_file, fps=20)
+        for video_frame in video_frames:
+            video_writer.append_data(video_frame)
+        video_writer.close()
+        print(f"Saved video file {episode_file}")
+
+    
 success_rate = success_count / total_episodes * 100
 print(f"Success rate: {success_rate}%")
